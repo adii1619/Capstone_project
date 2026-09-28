@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DRAGGY // GPS TELEMETRY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Share+Tech+Mono&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --cyan: #00f3ff;
+      --pink: #ff0055;
+      --acid: #d4ff00;
+      --bg: #050409;
+      --bg2: #0b0a14;
+      --panel: #0c0b16;
+      --line: rgba(0, 243, 255, .18);
+      --dim: #5a6b88;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--cyan);
+      font-family: 'Share Tech Mono', monospace;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      overflow-x: hidden;
+      image-rendering: pixelated;
+    }
+
+    .pixel {
+      font-family: 'Press Start 2P', monospace;
+    }
+
+    /* background grid + scanlines */
+    .bg-grid {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 34px 34px;
+      background-position: center;
+      mask-image: radial-gradient(ellipse at 50% 20%, black 40%, transparent 85%);
+    }
+
+    .scanlines {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+      opacity: .35;
+      background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .55) 0px, rgba(0, 0, 0, .55) 1px, transparent 2px, transparent 4px);
+      mix-blend-mode: overlay;
+    }
+
+    .vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 6;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, .65) 100%);
+    }
+
+    .wrap {
+      position: relative;
+      z-index: 1;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 18px 16px 34px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+
+    .logo {
+      font-size: 20px;
+      letter-spacing: 2px;
+      color: var(--pink);
+      text-shadow: 0 0 6px var(--pink), 0 0 18px var(--pink);
+    }
+
+    .logo span {
+      color: var(--cyan);
+      text-shadow: 0 0 6px var(--cyan), 0 0 18px var(--cyan);
+    }
+
+    .sub {
+      color: var(--dim);
+      font-size: 11px;
+      letter-spacing: 1px;
+    }
+
+    .status {
+      font-size: 10px;
+      color: var(--acid);
+      text-shadow: 0 0 6px var(--acid);
+    }
+
+    .grid-main {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 14px;
+    }
+
+    @media(max-width:820px) {
+      .grid-main {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: linear-gradient(180deg, var(--panel), #08070f);
+      border: 1px solid var(--line);
+      border-radius: 2px;
+      padding: 14px;
+      box-shadow: inset 0 0 30px rgba(0, 243, 255, .04), 0 0 0 1px rgba(0, 0, 0, .4);
+      position: relative;
+    }
+
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 1px solid transparent;
+      background: linear-gradient(90deg, transparent, var(--cyan), transparent) 0 0/100% 1px no-repeat;
+      opacity: .5;
+      pointer-events: none;
+    }
+
+    .panel h3 {
+      margin: 0 0 10px;
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: var(--cyan);
+      text-shadow: 0 0 6px rgba(0, 243, 255, .6);
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      image-rendering: pixelated;
+    }
+
+    /* speed readout */
+    .speed-row {
+      display: flex;
+      gap: 18px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .speed-box {
+      flex: 1;
+      min-width: 130px;
+    }
+
+    .speed-num {
+      font-size: 44px;
+      color: var(--pink);
+      text-shadow: 0 0 10px var(--pink), 0 0 26px rgba(255, 0, 85, .6);
+      line-height: 1;
+    }
+
+    .speed-num.cy {
+      color: var(--cyan);
+      text-shadow: 0 0 10px var(--cyan), 0 0 26px rgba(0, 243, 255, .6);
+    }
+
+    .speed-lbl {
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 2px;
+      margin-top: 4px;
+    }
+
+    .gauge {
+      margin-top: 14px;
+    }
+
+    .gauge-track {
+      height: 16px;
+      background: #0a0912;
+      border: 1px solid var(--line);
+      display: flex;
+      gap: 2px;
+      padding: 2px;
+    }
+
+    .gauge-track div.seg {
+      flex: 1;
+      background: #141225;
+    }
+
+    .gauge-track div.seg.on {
+      background: var(--cyan);
+      box-shadow: 0 0 6px var(--cyan);
+    }
+
+    .gauge-track div.seg.on.hi {
+      background: var(--pink);
+      box-shadow: 0 0 8px var(--pink);
+    }
+
+    .top-speed {
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px dashed var(--acid);
+      padding: 8px 12px;
+      background: rgba(212, 255, 0, .04);
+    }
+
+    .top-speed .lbl {
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: var(--acid);
+    }
+
+    .top-speed .val {
+      font-size: 20px;
+      color: var(--acid);
+      text-shadow: 0 0 8px var(--acid);
+    }
+
+    /* sat panel */
+    .sat-count {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+    }
+
+    .sat-count .n {
+      font-size: 30px;
+      color: var(--cyan);
+      text-shadow: 0 0 10px var(--cyan);
+    }
+
+    .sat-count .lbl {
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 2px;
+    }
+
+    .sat-bar {
+      display: flex;
+      gap: 3px;
+      margin-top: 8px;
+    }
+
+    .sat-bar i {
+      flex: 1;
+      height: 10px;
+      background: #141225;
+      border: 1px solid var(--line);
+    }
+
+    .sat-bar i.on {
+      background: var(--acid);
+      box-shadow: 0 0 6px var(--acid);
+      border-color: var(--acid);
+    }
+
+    /* drag hud */
+    .drag-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    @media(max-width:520px) {
+      .drag-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .split {
+      border: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: center;
+      background: #0a0913;
+      position: relative;
+    }
+
+    .split.active {
+      border-color: var(--pink);
+      box-shadow: 0 0 10px rgba(255, 0, 85, .35);
+    }
+
+    .split.done {
+      border-color: var(--acid);
+      box-shadow: 0 0 10px rgba(212, 255, 0, .25);
+    }
+
+    .split .rng {
+      font-size: 9px;
+      color: var(--dim);
+      letter-spacing: 1px;
+    }
+
+    .split .time {
+      font-size: 16px;
+      margin-top: 6px;
+      color: var(--cyan);
+    }
+
+    .split.done .time {
+      color: var(--acid);
+      text-shadow: 0 0 6px var(--acid);
+    }
+
+    .split canvas {
+      width: 28px;
+      height: 28px;
+      margin: 4px auto 0;
+    }
+
+    /* controls */
+    .controls {
+      margin-top: 14px;
+    }
+
+    .ctrl-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+
+    .ctrl-row label {
+      font-size: 10px;
+      letter-spacing: 2px;
+      color: var(--dim);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .ctrl-row label b {
+      color: var(--cyan);
+      font-weight: normal;
+    }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 18px;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    input[type=range]::-webkit-slider-runnable-track {
+      height: 6px;
+      background: #141225;
+      border: 1px solid var(--line);
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 18px;
+      margin-top: -7px;
+      background: var(--pink);
+      box-shadow: 0 0 8px var(--pink);
+      border: 1px solid #fff2;
+    }
+
+    input[type=range]::-moz-range-track {
+      height: 6px;
+      background: #141225;
+      border: 1px solid var(--line);
+    }
+
+    input[type=range]::-moz-range-thumb {
+      width: 14px;
+      height: 18px;
+      background: var(--pink);
+      border: 1px solid #fff2;
+      box-shadow: 0 0 8px var(--pink);
+    }
+
+    .sat-btns {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .sat-btns button {
+      flex: 1;
+      min-width: 26px;
+      padding: 6px 0;
+      background: #0a0913;
+      color: var(--cyan);
+      border: 1px solid var(--line);
+      font-family: 'Share Tech Mono', monospace;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .sat-btns button.active {
+      background: var(--cyan);
+      color: #04121a;
+      box-shadow: 0 0 8px var(--cyan);
+    }
+
+    .launch-btn {
+      width: 100%;
+      padding: 14px;
+      margin-top: 4px;
+      background: linear-gradient(180deg, #1a0410, #0a0913);
+      border: 1px solid var(--pink);
+      color: var(--pink);
+      letter-spacing: 3px;
+      font-size: 12px;
+      font-family: 'Press Start 2P', monospace;
+      cursor: pointer;
+      text-shadow: 0 0 6px var(--pink);
+      box-shadow: 0 0 14px rgba(255, 0, 85, .25);
+      transition: transform .1s;
+    }
+
+    .launch-btn:active {
+      transform: scale(.98);
+    }
+
+    .launch-btn:disabled {
+      opacity: .5;
+      cursor: default;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 18px;
+      font-size: 9px;
+      color: var(--dim);
+      letter-spacing: 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="bg-grid"></div>
+  <div class="scanlines"></div>
+  <div class="vignette"></div>
+
+  <div class="wrap">
+    <header>
+      <div class="logo">DRAG<span>GY</span> // GPS</div>
+      <div>
+        <div class="status" id="linkStatus">● TELEMETRY LINK ACTIVE</div>
+        <div class="sub">ESP32-DRAGGY-V2 · SIM MODE</div>
+      </div>
+    </header>
+
+    <div class="grid-main">
+      <div>
+        <div class="panel">
+          <h3>ROAD // RIDER TELEMETRY</h3>
+          <canvas id="riderCanvas" width="640" height="220"></canvas>
+        </div>
+
+        <div class="panel" style="margin-top:14px;">
+          <h3>VELOCITY</h3>
+          <div class="speed-row">
+            <div class="speed-box">
+              <div class="speed-num pixel" id="kmhNum">000</div>
+              <div class="speed-lbl">KM/H</div>
+            </div>
+            <div class="speed-box">
+              <div class="speed-num pixel cy" id="mphNum">000</div>
+              <div class="speed-lbl">MPH</div>
+            </div>
+          </div>
+          <div class="gauge">
+            <div class="gauge-track" id="gaugeTrack"></div>
+          </div>
+          <div class="top-speed">
+            <span class="lbl pixel">PEAK SPEED</span>
+            <span class="val pixel" id="topSpeedVal">000 KM/H</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel">
+          <h3>SATELLITE ARRAY</h3>
+          <canvas id="satCanvas" width="300" height="160"></canvas>
+          <div class="sat-count">
+            <div class="n pixel" id="satNum">00</div>
+            <div class="lbl">SATS<br>LOCKED</div>
+          </div>
+          <div class="sat-bar" id="satBar"></div>
+        </div>
+
+        <div class="panel" style="margin-top:14px;">
+          <h3>DRAG TIMING HUD</h3>
+          <div class="drag-grid" id="dragGrid"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel controls" style="margin-top:14px;">
+      <h3>SIMULATION CONTROL PANEL</h3>
+      <div class="ctrl-row">
+        <label>SPEED SIMULATOR <b id="speedLblVal">0 KM/H</b></label>
+        <input type="range" id="speedSlider" min="0" max="320" value="0" step="1">
+      </div>
+      <div class="ctrl-row">
+        <label>SATELLITE LOCK <b id="satLblVal">0</b></label>
+        <div class="sat-btns" id="satButtons"></div>
+      </div>
+      <button class="launch-btn" id="launchBtn">▶ LAUNCH DRAG TEST 0–100</button>
+    </div>
+
+    <footer>DRAGGY GPS SIMULATED OVERLAY · FOR DEMO PURPOSES ONLY</footer>
+  </div>
+
+  <script>
+    (function () {
+      // ---------- state ----------
+      let speed = 0;          // km/h
+      let topSpeed = 0;
+      let satCount = 0;
+      let dragActive = false;
+      let dragStart = 0;
+      let splitsHit = {40: false, 60: false, 80: false, 100: false};
+
+      const kmhNum = document.getElementById('kmhNum');
+      const mphNum = document.getElementById('mphNum');
+      const topSpeedVal = document.getElementById('topSpeedVal');
+      const speedSlider = document.getElementById('speedSlider');
+      const speedLblVal = document.getElementById('speedLblVal');
+      const gaugeTrack = document.getElementById('gaugeTrack');
+      const satNum = document.getElementById('satNum');
+      const satBar = document.getElementById('satBar');
+      const satButtons = document.getElementById('satButtons');
+      const satLblVal = document.getElementById('satLblVal');
+      const launchBtn = document.getElementById('launchBtn');
+      const dragGrid = document.getElementById('dragGrid');
+
+      // gauge segments
+      const SEG_COUNT = 40;
+      for (let i = 0; i < SEG_COUNT; i++) {
+        const d = document.createElement('div');
+        d.className = 'seg';
+        gaugeTrack.appendChild(d);
+      }
+      const segs = gaugeTrack.children;
+
+      // sat bar (12 max)
+      for (let i = 0; i < 12; i++) {
+        const el = document.createElement('i');
+        satBar.appendChild(el);
+      }
+      const satBarEls = satBar.children;
+
+      // sat buttons 0..12
+      for (let i = 0; i <= 12; i++) {
+        const b = document.createElement('button');
+        b.textContent = i;
+        b.dataset.v = i;
+        b.addEventListener('click', () => {setSats(i);});
+        satButtons.appendChild(b);
+      }
+
+      function setSats(n) {
+        satCount = n;
+        satNum.textContent = String(n).padStart(2, '0');
+        satLblVal.textContent = n;
+        for (let i = 0; i < 12; i++) {
+          satBarEls[i].classList.toggle('on', i < n);
+        }
+        [...satButtons.children].forEach(b => b.classList.toggle('active', +b.dataset.v === n));
+        document.getElementById('linkStatus').textContent = n >= 4 ? '● TELEMETRY LINK ACTIVE' : '○ ACQUIRING SIGNAL...';
+        document.getElementById('linkStatus').style.color = n >= 4 ? 'var(--acid)' : 'var(--pink)';
+      }
+      setSats(8);
+
+      // drag splits
+      const SPLIT_DEFS = [[0, 40], [0, 60], [0, 80], [0, 100]];
+      const splitEls = {};
+      SPLIT_DEFS.forEach(([a, b]) => {
+        const key = b;
+        const div = document.createElement('div');
+        div.className = 'split';
+        div.innerHTML = `<div class="rng">${a}-${b} KM/H</div><canvas width="28" height="28"></canvas><div class="time">--.--s</div>`;
+        dragGrid.appendChild(div);
+        splitEls[key] = div;
+      });
+
+      function resetSplits() {
+        splitsHit = {40: false, 60: false, 80: false, 100: false};
+        Object.values(splitEls).forEach(el => {
+          el.classList.remove('active', 'done');
+          el.querySelector('.time').textContent = '--.--s';
+        });
+      }
+      resetSplits();
+
+      function updateSpeedUI() {
+        const mph = speed * 0.621371;
+        kmhNum.textContent = String(Math.round(speed)).padStart(3, '0');
+        mphNum.textContent = String(Math.round(mph)).padStart(3, '0');
+        speedSlider.value = Math.round(speed);
+        speedLblVal.textContent = Math.round(speed) + ' KM/H';
+        if (speed > topSpeed) {topSpeed = speed; topSpeedVal.textContent = Math.round(topSpeed) + ' KM/H';}
+
+        const pct = Math.min(speed / 320, 1);
+        const litCount = Math.round(pct * SEG_COUNT);
+        for (let i = 0; i < SEG_COUNT; i++) {
+          const on = i < litCount;
+          segs[i].classList.toggle('on', on);
+          segs[i].classList.toggle('hi', on && i > SEG_COUNT * 0.75);
+        }
+
+        // drag split detection
+        if (dragActive) {
+          const elapsed = (performance.now() - dragStart) / 1000;
+          [40, 60, 80, 100].forEach(v => {
+            if (!splitsHit[v] && speed >= v) {
+              splitsHit[v] = true;
+              splitEls[v].classList.remove('active');
+              splitEls[v].classList.add('done');
+              splitEls[v].querySelector('.time').textContent = elapsed.toFixed(2) + 's';
+            } else if (!splitsHit[v]) {
+              splitEls[v].classList.add('active');
+            }
+          });
+          if (splitsHit[100]) {endDrag();}
+        }
+      }
+
+      speedSlider.addEventListener('input', e => {
+        if (dragActive) return;
+        speed = +e.target.value;
+        updateSpeedUI();
+      });
+
+      // ---------- drag test ----------
+      function startDrag() {
+        if (dragActive) return;
+        dragActive = true;
+        launchBtn.disabled = true;
+        launchBtn.textContent = '⏱ RUN IN PROGRESS...';
+        resetSplits();
+        speed = 0; updateSpeedUI();
+        dragStart = performance.now();
+        dragTick();
+      }
+      function dragTick() {
+        if (!dragActive) return;
+        const t = (performance.now() - dragStart) / 1000;
+        // simple accel curve approaching 100 asymptotically then linear
+        const target = 100;
+        const accelTime = 6.2; // seconds to reach ~100
+        speed = Math.min(target, target * (1 - Math.exp(-t / (accelTime / 3.2))));
+        updateSpeedUI();
+        if (speed < 99.9) {
+          requestAnimationFrame(dragTick);
+        }
+      }
+      function endDrag() {
+        dragActive = false;
+        launchBtn.disabled = false;
+        launchBtn.textContent = '▶ LAUNCH DRAG TEST 0–100';
+      }
+      launchBtn.addEventListener('click', startDrag);
+
+      updateSpeedUI();
+
+      // ---------- pixel rider canvas ----------
+      const rc = document.getElementById('riderCanvas');
+      const rctx = rc.getContext('2d');
+      rctx.imageSmoothingEnabled = false;
+      const PX = 4; // pixel size for sprite scaling
+      let roadOffset = 0;
+      let frame = 0;
+      let frameAcc = 0;
+
+      // bike sprite frames (two simple frames for wheel motion), 16x10 grid, values: 0 empty,1 cyan,2 pink,3 white
+      const bikeFrames = [
+        [
+          "................",
+          "......22........",
+          ".....222.2......",
+          "....2..222......",
+          "...1111222......",
+          "..1....1..2.....",
+          ".1.1111.1.2.2...",
+          "1..1..1.1.2.2...",
+          ".111....1...1...",
+          "................"
+        ],
+        [
+          "................",
+          "......22........",
+          ".....222.2......",
+          "....2..222......",
+          "...1111222......",
+          "..1....1..2.....",
+          ".1..111.1.2.1...",
+          "1.1..1..1.2..1..",
+          ".1.111...1..1...",
+          "................"
+        ]
+      ];
+      const colorMap = {'1': '#00f3ff', '2': '#ff0055', '3': '#d4ff00'};
+
+      function drawBike(ctx, ox, oy, scale, frameData) {
+        for (let y = 0; y < frameData.length; y++) {
+          for (let x = 0; x < frameData[y].length; x++) {
+            const c = frameData[y][x];
+            if (c !== '.') {
+              ctx.fillStyle = colorMap[c];
+              ctx.shadowColor = colorMap[c];
+              ctx.shadowBlur = 6;
+              ctx.fillRect(ox + x * scale, oy + y * scale, scale, scale);
+            }
+          }
+        }
+        ctx.shadowBlur = 0;
+      }
+
+      function renderRider() {
+        const w = rc.width, h = rc.height;
+        rctx.clearRect(0, 0, w, h);
+        // bg
+        rctx.fillStyle = '#08060f';
+        rctx.fillRect(0, 0, w, h);
+
+        // horizon glow
+        const grad = rctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, 'rgba(255,0,85,.08)');
+        grad.addColorStop(1, 'rgba(0,243,255,.02)');
+        rctx.fillStyle = grad;
+        rctx.fillRect(0, 0, w, h * 0.5);
+
+        // road
+        const roadTop = h * 0.55, roadBottom = h;
+        rctx.fillStyle = '#0d0c18';
+        rctx.fillRect(0, roadTop, w, roadBottom - roadTop);
+
+        // perspective-ish scrolling lane lines (simple horizontal pixel grid road)
+        const laneY = roadTop + (roadBottom - roadTop) / 2;
+        rctx.strokeStyle = '#1a1830';
+        for (let x = -40; x < w + 40; x += 20) {
+          rctx.fillStyle = '#151328';
+          rctx.fillRect(x + ((roadOffset * 2) % 20), roadTop, 2, roadBottom - roadTop);
+        }
+        // center dashed neon line
+        const dashLen = 18, gap = 14;
+        const speedFactor = 1 + speed / 40;
+        rctx.fillStyle = '#00f3ff';
+        rctx.shadowColor = '#00f3ff'; rctx.shadowBlur = 8;
+        for (let x = -dashLen; x < w + dashLen; x += dashLen + gap) {
+          const px = ((x + roadOffset) % (w + dashLen + gap)) - dashLen;
+          rctx.fillRect(px, laneY - 2, dashLen, 4);
+        }
+        rctx.shadowBlur = 0;
+
+        // side neon rails
+        rctx.fillStyle = '#ff0055'; rctx.shadowColor = '#ff0055'; rctx.shadowBlur = 6;
+        rctx.fillRect(0, roadTop, w, 3);
+        rctx.fillRect(0, roadBottom - 3, w, 3);
+        rctx.shadowBlur = 0;
+
+        // bike
+        const bikeScale = PX;
+        const bikeW = 16 * bikeScale;
+        const bx = w * 0.5 - bikeW / 2;
+        const by = laneY - 10 * bikeScale + 6;
+        // bob effect
+        const bob = Math.sin(frame * 0.6) * 1.5;
+        drawBike(rctx, bx, by + bob, bikeScale, bikeFrames[frame % 2]);
+
+        // speed streak lines when fast
+        if (speed > 30) {
+          rctx.strokeStyle = 'rgba(0,243,255,.5)';
+          for (let i = 0; i < 4; i++) {
+            const yy = by + 6 + i * 6;
+            rctx.beginPath();
+            rctx.moveTo(bx - 10 - i * 8, yy);
+            rctx.lineTo(bx - 30 - i * 10, yy);
+            rctx.lineWidth = 2;
+            rctx.stroke();
+          }
+        }
+      }
+
+      function riderLoop(dt) {
+        roadOffset += (speed * 0.6 + 2) * dt * 0.06;
+        frameAcc += dt;
+        const frameInterval = Math.max(0.06, 0.5 - speed * 0.0035);
+        if (frameAcc > frameInterval) {frame++; frameAcc = 0;}
+        renderRider();
+      }
+
+      // ---------- pixel satellite canvas ----------
+      const sc = document.getElementById('satCanvas');
+      const sctx = sc.getContext('2d');
+      sctx.imageSmoothingEnabled = false;
+      let satAngle = 0;
+      let pulse = 0;
+
+      function drawPixelDish(cx, cy, s) {
+        sctx.fillStyle = '#00f3ff'; sctx.shadowColor = '#00f3ff'; sctx.shadowBlur = 6;
+        const dish = [
+          "..1111..",
+          ".111111.",
+          "11111111",
+          "...11...",
+          "...11...",
+          "..1111..",
+        ];
+        for (let y = 0; y < dish.length; y++)
+          for (let x = 0; x < dish[y].length; x++)
+            if (dish[y][x] === '1') sctx.fillRect(cx + x * s - 4 * s, cy + y * s - 3 * s, s, s);
+        sctx.shadowBlur = 0;
+      }
+
+      function renderSat() {
+        const w = sc.width, h = sc.height;
+        sctx.clearRect(0, 0, w, h);
+        sctx.fillStyle = '#08060f'; sctx.fillRect(0, 0, w, h);
+        const cx = w / 2, cy = h / 2 + 10;
+
+        // orbit rings
+        sctx.strokeStyle = 'rgba(0,243,255,.15)';
+        [40, 60].forEach(r => {
+          sctx.beginPath(); sctx.arc(cx, cy, r, 0, Math.PI * 2); sctx.stroke();
+        });
+
+        // pulse ping
+        pulse = (pulse + 0.02) % 1;
+        sctx.strokeStyle = `rgba(212,255,0,${1 - pulse})`;
+        sctx.lineWidth = 2;
+        sctx.beginPath(); sctx.arc(cx, cy, 20 + pulse * 40, 0, Math.PI * 2); sctx.stroke();
+
+        drawPixelDish(cx, cy, 4);
+
+        // orbiting sats = satCount (capped visual to 12, drawn as small pixel blocks)
+        const shown = Math.min(satCount, 12);
+        for (let i = 0; i < shown; i++) {
+          const a = satAngle + (i / Math.max(shown, 1)) * Math.PI * 2;
+          const r = 55;
+          const x = cx + Math.cos(a) * r;
+          const y = cy + Math.sin(a) * r * 0.55;
+          sctx.fillStyle = i % 2 ? '#ff0055' : '#00f3ff';
+          sctx.shadowColor = sctx.fillStyle; sctx.shadowBlur = 5;
+          sctx.fillRect(x - 3, y - 3, 6, 6);
+          sctx.shadowBlur = 0;
+          // link line
+          sctx.strokeStyle = 'rgba(0,243,255,.25)';
+          sctx.beginPath(); sctx.moveTo(cx, cy); sctx.lineTo(x, y); sctx.stroke();
+        }
+        satAngle += 0.01 + satCount * 0.0015;
+      }
+
+      // ---------- main loop ----------
+      let last = performance.now();
+      function loop(now) {
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        riderLoop(dt);
+        renderSat();
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+
+    })();
+  </script>
+</body>
+
+</html>
